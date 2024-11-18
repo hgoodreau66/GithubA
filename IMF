@@ -1,1 +1,124 @@
+import numpy as np
+from scipy.interpolate import CubicSpline
+import matplotlib.pyplot as plt
+
+def find_extrema(signal):
+    maxima = []
+    minima = []
+    
+    for i in range(1, len(signal) - 1):
+        if signal[i-1] < signal[i] > signal[i+1]:
+            maxima.append(i)
+        elif signal[i-1] > signal[i] < signal[i+1]:
+            minima.append(i)
+            
+    return np.array(maxima), np.array(minima)
+
+def compute_envelope(t, signal, extrema):
+    if len(extrema) > 0:
+        if extrema[0] > 0:
+            extrema = np.r_[0, extrema]
+        if extrema[-1] < len(signal) - 1:
+            extrema = np.r_[extrema, len(signal) - 1]
+            
+        return CubicSpline(extrema, signal[extrema])(t)
+    return np.zeros_like(signal)
+
+def IMFextraction(signal, max_iterations=10, tolerance=0.1):
+    s = signal.copy()
+    l = np.arange(len(signal))
+    
+    for _ in range(max_iterations):
+        maxima, minima = find_extrema(s)
+        
+        if len(maxima) + len(minima) < 3:
+            break
+            
+        upper_envelope = compute_envelope(l, s, maxima)
+        lower_envelope = compute_envelope(l, s, minima)
+        mean_envelope = (upper_envelope + lower_envelope) / 2
+        
+        s_previous = s.copy()
+        s = s - mean_envelope
+        
+        if np.all(np.abs((s_previous - s) / (s_previous + np.finfo(float).eps)) < tolerance):
+            break
+            
+    return s
+
+def decompose_to_imfs(signal, extract_imf, num_imfs=3):
+    imfs = []
+    residual = signal.copy()
+    
+    for _ in range(num_imfs):
+        imf = extract_imf(residual)
+        imfs.append(imf)
+        residual = residual - imf
+        
+    return np.array(imfs)
+
+def process_images_imf(image_set, num_imfs=3, reshape_size=(128, 128, 3)):
+    processed_images = []
+    
+    for img in image_set:
+        img_reshaped = img.reshape(reshape_size)
+        
+        channel_imfs = []
+        for channel in range(3):
+            channel_data = img_reshaped[:, :, channel].flatten()
+            imfs = decompose_to_imfs(channel_data, num_imfs)
+            channel_imfs.append(imfs)
+            
+        processed_images.append(channel_imfs)
+    
+    return np.array(processed_images)
+
+def visualize_images_imf(original_image, imfs, genre_mapping, label, num_imfs_to_show=3):
+    plt.figure(figsize=(15, 5 * (num_imfs_to_show + 1)))
+    
+    genre_names = {v: k for k, v in genre_mapping.items()}
+    genre = genre_names.get(label, "Unknown")
+    
+    plt.subplot(num_imfs_to_show + 1, 1, 1)
+    plt.imshow(original_image.reshape(128, 128, 3))
+    plt.title(f'Original Image - Genre: {genre}')
+    plt.axis('off')
+    
+    for i in range(num_imfs_to_show):
+        plt.subplot(num_imfs_to_show + 1, 1, i + 2)
+        
+        imf_image = np.zeros((128, 128, 3))
+        for c in range(3):
+            imf_image[:, :, c] = imfs[c][i].reshape(128, 128)
+            
+        plt.imshow(imf_image + 0.5)
+        plt.title(f'IMF {i+1}')
+        plt.axis('off')
+    
+    plt.tight_layout()
+    plt.show()
+
+genre_mapping = {
+    "disco": 0,
+    "metal": 1,
+    "reggae": 2,
+    "blues": 3,
+    "rock": 4,
+    "classical": 5,
+    "jazz": 6,
+    "hiphop": 7,
+    "country": 8,
+    "pop": 9
+}
+
+def process_and_visualize(train_images, train_labels, num_samples=3, num_imfs=3):
+    indices = np.random.choice(len(train_images), num_samples, replace=False)
+    
+    for idx in indices:
+        image = train_images[idx]
+        label = train_labels[idx]
+        
+        imfs = process_images_imf(image.reshape(1, -1), num_imfs)[0]
+        
+        visualize_images_imf(image, imfs, genre_mapping, label, num_imfs)
 
